@@ -31,7 +31,7 @@ jobs:
 - job: Deploy
   pool:
     vmImage: 'ubuntu-latest'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/MRAQA'))
+  condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/MRAQA'))
   variables:
   - group: MRAQA-Validation-Variables
   steps:
@@ -66,6 +66,12 @@ jobs:
     - bash:
         sfdx force:source:deploy -c -x package/package.xml -l NoTestRun -w 60 --verbose -u prakash231saini@test.env.com
       displayName: Validate source code
+    - bash:
+        cat destructiveChanges/destructiveChanges.xml
+      displayName: Display DestructiveChanges xml
+    - bash:
+        sfdx force:mdapi:deploy -d destructiveChanges --ignorewarnings --wait 10 -u prakash231saini@test.env.com
+      displayName: Run DestructiveChanges Changes
     - task: Bash@3
       displayName: 'Update Variable Group'
       env:
