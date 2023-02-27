@@ -1,0 +1,96 @@
+# Starter pipeline
+name: $(TeamProject)_$(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  batch: "true"
+  branches:
+    include:
+      - MRAfeature/US-*
+      - DTFfeature/US-*
+  paths:
+    include:
+      - force-app
+    exclude:
+      - README.md
+      - azure-pipelines.yml
+      - Deployment.yml
+pr:
+  autoCancel: "true"
+  branches:
+    include:
+      - MRAfeature/US-*
+      - DTFfeature/US-*
+  paths:
+    include:
+      - force-app
+    exclude:
+      - README.md
+      - azure-pipelines.yml
+      - Deployment.yml
+jobs:
+- job: Deploy
+  pool:
+    vmImage: 'ubuntu-latest'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/MRAQA'))
+  variables:
+  - group: MRAQA-Validation-Variables
+  steps:
+    - checkout: self
+      fetchDepth: full  
+      displayName: Git Checkout   
+    - task: NodeTool@0
+      inputs:
+        versionSpec: $(nodeversion)
+        checkLatest: true
+    - bash:
+        npm install --global oclif
+      displayName: Install oclif dependencies 
+    - bash:
+        npm install --global sfdx-cli@latest
+      displayName: Install Salesforce CLI
+    - bash:
+        echo 'y' | sfdx plugins:install sfdx-git-delta
+      displayName: Install sfdx-git-delta
+    - bash:
+        echo 'Y' | sfdx plugins:install sfpowerkit
+      displayName: 'Install SfPowerKit'
+    - bash: 
+        sfdx force:auth:sfdxurl:store -f QAOrgAuthURL -s -a $(QA_ORG)
+      displayName: Authorize Salesforce org
+    - bash:
+        sfdx sgd:source:delta --to HEAD --from HEAD^ --output . --ignore .packageignore
+      displayName: Get delta
+    - bash:
+        cat package/package.xml
+      displayName: Display package xml
+    - bash:
+        sfdx force:source:deploy -c -x package/package.xml -l NoTestRun -w 60 --verbose -u prakash231saini@test.env.com
+      displayName: Validate source code
+    - task: Bash@3
+      displayName: 'Update Variable Group'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)      
+      inputs:
+        targetType: inline
+        script: |
+          GROUPNAME='MRAQA-Deployment-Variables'
+          URLPUT='https://dev.azure.com/{XYZ}/{XYZ}/_apis/distributedtask/variablegroups/{XXXX}?api-version=5.1-preview.1'
+          JSONVARS2='{"COMMIT_ID": {"value":"$(Build.SourceVersion)"}, "nodeversion": {"value": "16.0.0"}, "SF_TESTLEVEL": {"value": "NoTestRun"}}'
+          JSON_STRING=$( jq -n \
+            --argjson variables "$JSONVARS2" \
+            --arg type "Vsts" \
+            --arg name "$GROUPNAME" \
+            --arg description "Update My Variable Group." \
+              '{variables: $variables, type: $type, name: $name, description: $description}' )
+          
+          echo "========================== Start - Request Body ========================"
+          echo "$JSON_STRING"
+          echo "========================== End - Request Body =========================="
+          
+          curl -X PUT \
+          -u :$SYSTEM_ACCESSTOKEN \
+          -H 'Accept: application/json' \
+          -H 'Content-Type: application/json' \
+          -d "$JSON_STRING" \
+          $URLPUT
+          echo $URLPUT
